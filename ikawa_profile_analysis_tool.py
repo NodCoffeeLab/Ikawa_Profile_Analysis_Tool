@@ -1,4 +1,4 @@
-# Ikawa Profile Analysis Tool (v8.0 - Final Stable Version)
+# Ikawa_Profile_Analysis_Tool.py (v9.0 Final)
 # -*- coding: utf-8 -*-
 
 import streamlit as st
@@ -9,7 +9,7 @@ import plotly.express as px
 from streamlit_plotly_events import plotly_events
 
 # ==============================================================================
-# 핵심 함수 (보간 기능 제거, 안정화)
+# 핵심 함수 (보간 기능 완전 제거)
 # ==============================================================================
 
 def create_profile_template():
@@ -30,6 +30,7 @@ def process_profile_data(df: pd.DataFrame, main_input_method: str) -> pd.DataFra
         if col in processed_df.columns:
             processed_df[col] = pd.to_numeric(processed_df[col], errors='coerce')
 
+    # '온도' 열에 유효한 값이 있는 행만 남깁니다.
     processed_df.dropna(subset=['온도℃'], inplace=True)
     if processed_df.empty: return create_profile_template()
     processed_df.reset_index(drop=True, inplace=True)
@@ -55,64 +56,42 @@ def process_profile_data(df: pd.DataFrame, main_input_method: str) -> pd.DataFra
     ror_per_sec = np.divide(temp_diff, time_diff, out=np.zeros_like(temp_diff, dtype=float), where=where_condition)
     processed_df['ROR(초당)'] = pd.Series(ror_per_sec).fillna(0)
     
-    # 원본 템플릿과 합쳐 최종 형태 유지
     final_df = create_profile_template()
     final_df.update(processed_df)
     return final_df
 
 def display_hover_info(hovered_time, selected_profiles, graph_data, colors):
-    """그래프 호버 시 분석 패널에 정보를 표시합니다."""
+    """그래프 호버 시 분석 패널에 정보를 표시합니다. (보간 기능 없음)"""
     st.markdown("#### 분석 정보")
     if hovered_time is None or not graph_data:
         st.info("그래프 위에 마우스를 올리면 상세 정보가 표시됩니다.")
         return
+        
     hover_sec = int(hovered_time)
     
-    try:
-        first_profile_name = next(name for name in selected_profiles if name in graph_data and graph_data[name] is not None)
-        df_calc_first = graph_data[first_profile_name]
-        
-        valid_data = df_calc_first.dropna(subset=['누적(초)', '온도℃'])
-        if len(valid_data) > 1:
-            temp_at_hover = np.interp(hover_sec, valid_data['누적(초)'], valid_data['온도℃'])
-        elif len(valid_data) == 1:
-            temp_at_hover = valid_data['온도℃'].iloc[0]
-        else:
-            return
-
-        st.markdown(f"**{hover_sec // 60}분 {hover_sec % 60:02d}초 ({hover_sec}초) / {temp_at_hover:.1f}℃**")
-    except (StopIteration, KeyError, IndexError):
-         return
+    st.markdown(f"**{hover_sec // 60}분 {hover_sec % 60:02d}초 ({hover_sec}초)**")
     st.divider()
+
     for i, name in enumerate(selected_profiles):
         if name in graph_data:
             df_calc = graph_data.get(name)
-            if df_calc is None: continue
+            if df_calc is None or df_calc.empty: continue
             
             color = colors[i % len(colors)]
             
             valid_calc = df_calc.dropna(subset=['누적(초)'])
             if valid_calc.empty: continue
-
-            current_segment_search = valid_calc[valid_calc['누적(초)'] <= hover_sec]
-            if current_segment_search.empty: continue
-            current_segment = current_segment_search.iloc[-1]
-
-            current_time = current_segment['누적(초)']
+            
+            # 호버된 시간 바로 이전의 데이터 포인트 찾기
+            segment_search = valid_calc[valid_calc['누적(초)'] <= hover_sec]
+            if segment_search.empty: continue
+            current_segment = segment_search.iloc[-1]
+            
             current_ror = current_segment['ROR(초당)']
             current_temp = current_segment['온도℃']
-            
-            is_on_point = abs(current_time - hover_sec) <= 0.5
-            
-            if is_on_point:
-                display_temp = current_temp
-                point_num = current_segment['번호']
-                st.markdown(f"<span style='color:{color};'>●</span> **{name}**: 포인트 {int(point_num)}: {display_temp:.1f}℃ (초당 {current_ror:.3f}℃ 상승)", unsafe_allow_html=True)
-            else:
-                time_in_segment = hover_sec - current_time
-                interp_temp = current_temp + current_ror * time_in_segment
-                next_point_num = int(current_segment['번호']) + 1
-                st.markdown(f"<span style='color:{color};'>●</span> **{name}**: 포인트 {int(current_segment['번호'])}-{next_point_num} 구간: {interp_temp:.1f}℃ (초당 {current_ror:.3f}℃ 상승)", unsafe_allow_html=True)
+            point_num = current_segment['번호']
+
+            st.markdown(f"<span style='color:{color};'>●</span> **{name}**: 포인트 {int(point_num)} ({current_temp:.1f}℃) 구간의 ROR은 초당 {current_ror:.3f}℃ 입니다.", unsafe_allow_html=True)
 
 # ==============================================================================
 # 상태(Session State) 초기화
@@ -128,8 +107,8 @@ if 'data_synced' not in st.session_state: st.session_state.data_synced = False
 # ==============================================================================
 # UI 렌더링
 # ==============================================================================
-st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v8.0")
-st.title("☕ 이카와 로스팅 프로파일 계산 툴 v8.0 (Final)")
+st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v9.0")
+st.title("☕ 이카와 로스팅 프로파일 계산 툴 v9.0 (Final)")
 
 with st.sidebar:
     st.header("④ 보기 옵션")
@@ -143,52 +122,60 @@ with st.sidebar:
         st.write("`graph_data`의 프로파일 개수: " + str(len(st.session_state.graph_data)))
 
 st.header("① 데이터 입력")
+st.radio("입력 방식", ['시간 입력', '구간 입력'], horizontal=True, key="main_input_method")
 
-# --- 프로파일 선택 탭 (Single-View Architecture) ---
-profile_tabs = st.tabs(list(st.session_state.profiles.keys()))
+# --- 데이터 입력 Form (딜레이 해결) ---
+with st.form("data_input_form"):
+    profile_cols = st.columns(len(st.session_state.profiles))
+    form_data = {}
 
-for i, tab in enumerate(profile_tabs):
-    with tab:
-        active_profile_name = list(st.session_state.profiles.keys())[i]
-        
-        # --- 이름 변경 ---
-        new_name = st.text_input("프로파일 이름", value=active_profile_name, key=f"rename_{active_profile_name}")
-        if new_name != active_profile_name and new_name:
-            if new_name in st.session_state.profiles: st.error("이름 중복")
+    for i, name in enumerate(st.session_state.profiles.keys()):
+        with profile_cols[i]:
+            form_data[name] = {}
+            # 이름 변경
+            form_data[name]['new_name'] = st.text_input("프로파일 이름", value=name, key=f"rename_{name}")
+            
+            # 데이터 테이블
+            column_config = { "번호": st.column_config.NumberColumn(disabled=True) }
+            if not st.session_state.show_hidden_cols:
+                hidden_cols = ['누적(초)', 'ROR(초당)']
+                if st.session_state.main_input_method == '시간 입력': hidden_cols.append("구간(초)")
+                else: hidden_cols.extend(["분", "초"])
+                for col in hidden_cols: column_config[col] = None
+            
+            form_data[name]['table'] = st.data_editor(st.session_state.profiles[name], key=f"editor_{name}", num_rows="dynamic", column_config=column_config)
+
+    st.markdown("---")
+    st.header("③ 액션 버튼")
+    sync_submitted = st.form_submit_button("🔄 데이터 동기화", use_container_width=True)
+
+# --- Form 제출 후 로직 처리 ---
+if sync_submitted:
+    with st.spinner("데이터 동기화 중..."):
+        # 이름 변경 처리
+        new_names = {name: data['new_name'] for name, data in form_data.items()}
+        if any(k != v for k, v in new_names.items()):
+            if len(set(new_names.values())) < len(new_names):
+                st.error("프로파일 이름이 중복될 수 없습니다.")
             else:
-                items = list(st.session_state.profiles.items())
-                items[i] = (new_name, st.session_state.profiles[active_profile_name])
-                st.session_state.profiles = dict(items)
-                st.rerun()
-
-        # --- 입력 방식 선택 ---
-        st.radio("입력 방식", ['시간 입력', '구간 입력'], horizontal=True, key="main_input_method")
+                new_profiles = {}
+                for old_name, data in form_data.items():
+                    new_profiles[data['new_name']] = st.session_state.profiles[old_name]
+                st.session_state.profiles = new_profiles
         
-        # --- 데이터 테이블 ---
-        column_config = { "번호": st.column_config.NumberColumn(disabled=True) }
-        if not st.session_state.show_hidden_cols:
-            hidden_cols = ['누적(초)', 'ROR(초당)']
-            if st.session_state.main_input_method == '시간 입력': hidden_cols.append("구간(초)")
-            else: hidden_cols.extend(["분", "초"])
-            for col in hidden_cols: column_config[col] = None
-        
-        edited_df = st.data_editor(st.session_state.profiles[active_profile_name], key=f"editor_{active_profile_name}", num_rows="dynamic", column_config=column_config)
+        # 데이터 업데이트 및 계산 처리
+        for name, data in form_data.items():
+            current_name = new_names.get(name, name)
+            st.session_state.profiles[current_name] = process_profile_data(data['table'], st.session_state.main_input_method)
 
-        # --- 데이터 동기화 버튼 ---
-        if st.button("🔄 이 프로파일 동기화", key=f"sync_{active_profile_name}"):
-            with st.spinner(f"'{active_profile_name}' 동기화 중..."):
-                st.session_state.profiles[active_profile_name] = process_profile_data(edited_df, st.session_state.main_input_method)
-                st.session_state.data_synced = True
-            st.success(f"'{active_profile_name}' 동기화 완료!")
-            st.rerun()
-
-st.markdown("---")
-st.header("③ 액션 버튼")
+    st.session_state.data_synced = True
+    st.success("데이터 동기화 완료!")
+    st.rerun()
 
 # --- 그래프 업데이트 및 프로파일 추가 버튼 ---
 btn_cols = st.columns([4, 1])
 with btn_cols[0]:
-    if st.button("📈 모든 프로파일 그래프 업데이트", use_container_width=True, disabled=not st.session_state.data_synced):
+    if st.button("📈 그래프 업데이트", use_container_width=True, disabled=not st.session_state.data_synced):
         with st.spinner("그래프 생성 중..."):
             st.session_state.graph_data = st.session_state.profiles
         st.session_state.data_synced = False
