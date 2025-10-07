@@ -10,7 +10,6 @@ def create_new_profile():
     data = {'Point': points, '온도': [np.nan]*len(points), '분': [np.nan]*len(points), '초': [np.nan]*len(points), '구간 시간 (초)': [np.nan]*len(points), '누적 시간 (초)': [np.nan]*len(points), 'ROR (℃/sec)': [np.nan]*len(points)}
     df = pd.DataFrame(data)
     df.loc[0, ['분', '초', '누적 시간 (초)']] = 0
-    # 0번 행의 구간 시간은 다음 포인트를 위한 것이므로 비워두지 않습니다.
     return df
 
 # --- 여기가 수정된 부분: 새로운 '구간' 계산 로직 ---
@@ -22,14 +21,13 @@ def sync_profile_data(df, primary_input_mode):
 
     if primary_input_mode == '시간 입력':
         calc_df['누적 시간 (초)'] = calc_df['분'].fillna(0) * 60 + calc_df['초'].fillna(0)
-        # 구간 시간 계산: 다음 포인트의 누적시간 - 현재 포인트의 누적시간
         calc_df['구간 시간 (초)'] = calc_df['누적 시간 (초)'].diff().shift(-1)
 
     elif primary_input_mode == '구간 입력':
-        # 누적 시간 계산: 0번 행부터 입력된 구간 시간들의 누적 합
-        calc_df['누적 시간 (초)'] = calc_df['구간 시간 (초)'].fillna(0).cumsum()
-        # 0번 포인트의 누적 시간은 항상 0이므로, 계산된 값을 한 칸씩 아래로 내립니다.
-        calc_df['누적 시간 (초)'] = calc_df['누적 시간 (초)'].shift(1).fillna(0)
+        # 0번 행부터 입력된 구간 시간들의 누적 합을 구하고, 0번 포인트의 누적 시간(0)과 합칩니다.
+        cumulative_seconds = calc_df['구간 시간 (초)'].fillna(0).cumsum()
+        # 누적 시간을 한 칸씩 아래로 내리고, 첫 행은 0으로 채웁니다.
+        calc_df['누적 시간 (초)'] = np.concatenate(([0], cumulative_seconds[:-1].values))
 
         calc_df['분'] = (calc_df['누적 시간 (초)'] // 60).astype(int)
         calc_df['초'] = (calc_df['누적 시간 (초)'] % 60).astype(int)
@@ -37,7 +35,6 @@ def sync_profile_data(df, primary_input_mode):
     df.update(calc_df)
     return df
 
-# --- parse_excel_data 및 calculate_ror 함수 (변경 없음) ---
 def parse_excel_data(text_data, mode):
     new_data = []; lines = text_data.strip().split('\n')
     for i, line in enumerate(lines):
@@ -48,9 +45,9 @@ def parse_excel_data(text_data, mode):
                 if len(parts) >= 3: row['온도'], row['분'], row['초'] = float(parts[0]), int(parts[1]), int(parts[2])
                 elif len(parts) >= 1: row['온도'], row['분'], row['초'] = float(parts[0]), 0, 0
                 else: continue
-            elif mode == '구간 입력':
+            elif mode == '구간 입력': # 새로운 구간 입력 방식에 맞게 수정
                 if len(parts) >= 2: row['온도'], row['구간 시간 (초)'] = float(parts[0]), int(parts[1])
-                elif len(parts) >= 1: row['온도'], row['구간 시간 (초)'] = float(parts[0]), 0
+                elif len(parts) >= 1: row['온도'], row['구간 시간 (초)'] = np.nan # 구간 시간은 비워둠
                 else: continue
             new_data.append(row)
         except (ValueError, IndexError): continue
@@ -77,6 +74,7 @@ if 'profiles' not in st.session_state or not st.session_state.profiles:
     st.session_state.profiles = {'프로파일 1': create_new_profile(), '프로파일 2': create_new_profile(), '프로파일 3': create_new_profile()}
 if 'processed_profiles' not in st.session_state: st.session_state.processed_profiles = None
 if 'graph_button_enabled' not in st.session_state: st.session_state.graph_button_enabled = False
+if 'selected_time' not in st.session_state: st.session_state.selected_time = 0.0
 
 st.subheader("프로파일 관리");
 if len(st.session_state.profiles) < 10:
@@ -91,9 +89,9 @@ st.divider()
 profile_names = list(st.session_state.profiles.keys())
 cols = st.columns(len(profile_names))
 for i, col in enumerate(cols):
-    # (데이터 입력 UI 로직: 이전과 거의 동일)
     current_name = profile_names[i]
     with col:
+        # (데이터 입력 UI 로직: 이전과 거의 동일)
         col1, col2 = st.columns([0.8, 0.2]);
         with col1: new_name = st.text_input("프로파일 이름", value=current_name, key=f"name_input_{current_name}", label_visibility="collapsed")
         with col2:
@@ -108,11 +106,11 @@ for i, col in enumerate(cols):
         main_input_method = st.radio("입력 방식", ("시간 입력", "구간 입력"), key=f"main_input_{current_name}", horizontal=True)
         sub_input_method = st.radio("입력 방법", ("기본", "엑셀 데이터 붙여넣기"), key=f"sub_input_{current_name}", horizontal=True)
         if main_input_method == "구간 입력" and sub_input_method == "기본":
-             st.info("구간(초): 현재 포인트에서 다음 포인트까지 걸릴 시간") # 안내 문구 수정
+             st.info("구간(초): 현재 포인트에서 다음 포인트까지 걸릴 시간")
         edited_df = st.session_state.profiles[current_name]
         text_area_content = ""
         if sub_input_method == "엑셀 데이터 붙여넣기":
-            placeholder = "120 0 0\n..." if main_input_method == "시간 입력" else "120 40\n140 43\n..." # 구간 입력 예시 수정
+            placeholder = "120 0 0\n..." if main_input_method == "시간 입력" else "120 40\n140 43\n..."
             text_area_content = st.text_area("엑셀 데이터 붙여넣기", height=250, placeholder=placeholder, key=f"textarea_{current_name}", label_visibility="collapsed")
         else:
             df_editor_key = f"editor_{main_input_method}_{current_name}"; column_config = {}
@@ -129,28 +127,27 @@ for i, col in enumerate(cols):
                 synced_df = sync_profile_data(profile_df_to_sync, main_input_method); st.session_state.profiles[current_name] = synced_df; st.session_state.graph_button_enabled = True; st.rerun()
 st.divider()
 
-# --- 그래프 및 분석 패널 UI (슬라이더 적용) ---
+# --- 그래프 및 분석 패널 UI (슬라이더 및 스타일 개선) ---
 st.header("📈 그래프 및 분석")
 if st.button("📊 그래프 업데이트", disabled=not st.session_state.graph_button_enabled):
     st.session_state.processed_profiles = {name: calculate_ror(df.copy()) for name, df in st.session_state.profiles.items()}
-    st.session_state.selected_time = 0.0 # 그래프 업데이트 시 슬라이더 초기화
+    st.session_state.selected_time = 0.0
 
 if st.session_state.processed_profiles:
     graph_col, analysis_col = st.columns([0.7, 0.3])
-    max_time = max(df['누적 시간 (초)'].max() for df in st.session_state.processed_profiles.values() if not df.empty) if st.session_state.processed_profiles else 1
+    all_dfs = st.session_state.processed_profiles.values()
+    valid_dfs = [df for df in all_dfs if df['누적 시간 (초)'].notna().sum() > 1]
+    max_time = max(df['누적 시간 (초)'].max() for df in valid_dfs) if valid_dfs else 1.0
 
     with graph_col:
         fig = go.Figure()
         for name, df in st.session_state.processed_profiles.items():
             valid_df = df.dropna(subset=['누적 시간 (초)', '온도'])
-            if not valid_df.empty:
+            if len(valid_df) > 1:
                 fig.add_trace(go.Scatter(x=valid_df['누적 시간 (초)'], y=valid_df['온도'], mode='lines+markers', name=name, yaxis='y1'))
-                fig.add_trace(go.Scatter(x=valid_df['ROR (℃/sec)'], y=valid_df['온도'], mode='lines', name=f'{name} ROR', yaxis='y2', line=dict(dash='dot')))
+                fig.add_trace(go.Scatter(x=valid_df['누적 시간 (초)'], y=valid_df['ROR (℃/sec)'], mode='lines', name=f'{name} ROR', yaxis='y2', line=dict(dash='dot')))
         fig.update_layout(xaxis_title='시간 (초)', yaxis_title='온도 (°C)', yaxis=dict(range=[85, 235]), yaxis2=dict(title='ROR (℃/sec)', overlaying='y', side='right', range=[0, 0.75]), xaxis=dict(range=[0, 360]), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        
-        # 슬라이더에서 선택된 시간에 맞춰 세로선을 추가
-        if 'selected_time' in st.session_state:
-            fig.add_vline(x=st.session_state.selected_time, line_width=1, line_dash="dash", line_color="grey")
+        fig.add_vline(x=st.session_state.selected_time, line_width=1, line_dash="dash", line_color="grey")
         st.plotly_chart(fig, use_container_width=True)
 
     with analysis_col:
@@ -161,18 +158,31 @@ if st.session_state.processed_profiles:
             if not valid_df.empty:
                 total_time = valid_df['누적 시간 (초)'].max()
                 time_str = f"{int(total_time // 60)}분 {int(total_time % 60)}초"
-                # Markdown을 사용해 폰트 크기 키우기
-                st.markdown(f"**{name}**: <span style='font-size: 1.2em;'>{time_str}</span>", unsafe_allow_html=True)
+                st.markdown(f"**{name}**: <span style='font-size: 1.1em;'>{time_str}</span>", unsafe_allow_html=True)
         st.markdown("---")
         
-        # --- 타임라인 슬라이더 ---
-        st.session_state.selected_time = st.slider("시간 선택 (초)", 0.0, max_time, st.session_state.get('selected_time', 0.0), 0.1)
+        # 슬라이더 키를 고유하게 만들어 상태 유지 문제 해결
+        st.session_state.selected_time = st.slider("시간 선택 (초)", 0.0, max_time, st.session_state.selected_time, 0.1, key="time_slider")
         
         st.write("**실시간 상세 정보**")
         selected_time = st.session_state.selected_time
         st.metric(label="선택된 시간", value=f"{int(selected_time // 60)}분 {int(selected_time % 60):02d}초 ({selected_time:.1f}초)")
         for name, df in st.session_state.processed_profiles.items():
             valid_df = df.dropna(subset=['누적 시간 (초)', '온도', 'ROR (℃/sec)'])
-            if not valid_df.empty and len(valid_df) > 1:
-                hover_temp = np.interp(selected_time, valid_df['누적 시간 (초)'], valid_df['온도']); hover_ror = np.interp(selected_time, valid_df['누적 시간 (초)'], valid_df['ROR (℃/sec)'])
-                st.write(f"**{name}**"); st.text(f"  - 온도: {hover_temp:.1f}℃"); st.text(f"  - ROR: {hover_ror:.3f}℃/sec")
+            if len(valid_df) > 1:
+                profile_max_time = valid_df['누적 시간 (초)'].max()
+                st.write(f"**{name}**")
+                
+                # 선택된 시간이 프로파일의 최대 시간을 넘었는지 확인
+                if selected_time > profile_max_time:
+                    temp_str = "--"
+                    ror_str = "--"
+                else:
+                    hover_temp = np.interp(selected_time, valid_df['누적 시간 (초)'], valid_df['온도'])
+                    hover_ror = np.interp(selected_time, valid_df['누적 시간 (초)'], valid_df['ROR (℃/sec)'])
+                    temp_str = f"{hover_temp:.1f}℃"
+                    ror_str = f"{hover_ror:.3f}℃/sec"
+                
+                # Markdown을 사용해 스타일과 줄 간격 조절
+                st.markdown(f"<p style='margin:0; font-size: 0.95em;'>&nbsp;&nbsp;- 온도: {temp_str}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='margin:0; font-size: 0.95em;'>&nbsp;&nbsp;- ROR: {ror_str}</p>", unsafe_allow_html=True)
