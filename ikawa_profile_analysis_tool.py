@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from streamlit_plotly_events import plotly_events
+# from streamlit_plotly_events import plotly_events # 이번 테스트에서는 잠시 비활성화
 
 # --- 백엔드 함수 (변경 없음) ---
 def create_new_profile():
@@ -124,7 +124,7 @@ for i, col in enumerate(cols):
 
 st.divider()
 
-# --- 그래프 및 분석 패널 UI (버그 수정) ---
+# --- 그래프 및 분석 패널 UI (테스트용으로 수정) ---
 st.header("📈 그래프 및 분석")
 if st.button("📊 그래프 업데이트", disabled=not st.session_state.graph_button_enabled):
     st.session_state.processed_profiles = {name: calculate_ror(df.copy()) for name, df in st.session_state.profiles.items()}
@@ -138,17 +138,17 @@ if st.session_state.processed_profiles:
             if not valid_df.empty:
                 fig.add_trace(go.Scatter(x=valid_df['누적 시간 (초)'], y=valid_df['온도'], mode='lines+markers', name=name, yaxis='y1'))
                 fig.add_trace(go.Scatter(x=valid_df['누적 시간 (초)'], y=valid_df['ROR (℃/sec)'], mode='lines', name=f'{name} ROR', yaxis='y2', line=dict(dash='dot')))
-        
-        # --- 여기가 수정된 부분 ---
         fig.update_layout(
-            xaxis_title='시간 (초)',
-            yaxis_title='온도 (°C)',
+            xaxis_title='시간 (초)', yaxis_title='온도 (°C)',
             yaxis=dict(range=[85, 235]),
-            yaxis2=dict(title='ROR (℃/sec)', overlaying='y', side='right', range=[0, 0.75]), # yaxis2_range를 yaxis2 안으로 이동
+            yaxis2=dict(title='ROR (℃/sec)', overlaying='y', side='right', range=[0, 0.75]),
             xaxis=dict(range=[0, 360]),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
-        selected_points = plotly_events(fig, click_event=False, hover_event=True, key="graph_events")
+        
+        # --- 여기가 수정된 부분 ---
+        # plotly_events 대신 Streamlit 기본 기능으로 그래프를 표시합니다.
+        st.plotly_chart(fig, use_container_width=True)
 
     with analysis_col:
         st.subheader("🔍 분석 정보"); st.markdown("---")
@@ -158,13 +158,6 @@ if st.session_state.processed_profiles:
             if not valid_df.empty:
                 total_time = valid_df['누적 시간 (초)'].max(); st.metric(label=name, value=f"{int(total_time // 60)}분 {int(total_time % 60)}초")
         st.markdown("---")
-        st.write("**실시간 상세 정보**")
-        if selected_points:
-            hover_time = selected_points[0]['x']; st.metric(label="시간", value=f"{int(hover_time // 60)}분 {int(hover_time % 60):02d}초 ({hover_time:.1f}초)")
-            for name, df in st.session_state.processed_profiles.items():
-                valid_df = df.dropna(subset=['누적 시간 (초)', '온도', 'ROR (℃/sec)'])
-                if not valid_df.empty and len(valid_df) > 1:
-                    hover_temp = np.interp(hover_time, valid_df['누적 시간 (초)'], valid_df['온도']); hover_ror = np.interp(hover_time, valid_df['누적 시간 (초)'], valid_df['ROR (℃/sec)'])
-                    st.write(f"**{name}**"); st.text(f"  - 온도: {hover_temp:.1f}℃"); st.text(f"  - ROR: {hover_ror:.3f}℃/sec")
-        else:
-            st.info("그래프 위에 마우스 커서를 올리면 상세 정보가 표시됩니다.")
+        # 실시간 정보 표시는 잠시 비활성화합니다.
+        # st.write("**실시간 상세 정보**")
+        # ...
