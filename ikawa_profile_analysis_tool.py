@@ -145,7 +145,7 @@ if st.session_state.processed_profiles:
         fig.add_vline(x=selected_time_int, line_width=1, line_dash="dash", line_color="grey")
 
         fig.update_layout(
-            height=800,
+            height=900,
             xaxis_title='시간 (초)', yaxis_title='온도 (°C)', yaxis=dict(range=[85, 235]), yaxis2=dict(title='ROR (℃/sec)', overlaying='y', side='right', range=[0, 0.75]), xaxis=dict(range=[0, 360]), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig, use_container_width=True)
 
