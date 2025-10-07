@@ -1,4 +1,4 @@
-# Ikawa Profile Analysis Tool (v9.3 Refactored for Performance)
+# Ikawa Profile Analysis Tool (v9.4 Refactored for Performance)
 # -*- coding: utf-8 -*-
 
 import streamlit as st
@@ -94,16 +94,18 @@ if 'profiles' not in st.session_state:
     st.session_state.profiles = { f"프로파일 {i+1}": create_profile_template() for i in range(3) }
 if 'next_profile_num' not in st.session_state:
     st.session_state.next_profile_num = 4
+# --- FIX: 팝업창의 상태를 관리할 변수 추가 ---
+if 'show_editor' not in st.session_state:
+    st.session_state.show_editor = False
 
 # ==============================================================================
-# NEW: 데이터 수정용 팝업(Dialog) 함수
+# 데이터 수정용 팝업(Dialog) 함수
 # ==============================================================================
 @st.dialog("프로파일 데이터 관리")
 def profile_editor_dialog():
     st.markdown("#### 데이터 입력 및 수정")
     input_method = st.radio("입력 방식", ['시간 입력', '구간 입력'], key="dialog_input_method", horizontal=True)
 
-    # st.tabs를 사용하여 각 프로파일을 탭으로 분리
     profile_tabs = st.tabs(list(st.session_state.profiles.keys()))
     edited_data = {}
 
@@ -133,46 +135,58 @@ def profile_editor_dialog():
                 height=500,
                 column_config=column_config
             )
-
     st.divider()
-    # 팝업 내 프로파일 추가 버튼
-    if st.button("＋ 프로파일 추가", use_container_width=True):
-        if len(st.session_state.profiles) < 10:
-            new_name = f"프로파일 {st.session_state.next_profile_num}"
-            st.session_state.profiles[new_name] = create_profile_template()
-            st.session_state.next_profile_num += 1
+
+    col1, col2, col3 = st.columns([2,2,1])
+    with col1:
+        if st.button("＋ 프로파일 추가", use_container_width=True):
+            if len(st.session_state.profiles) < 10:
+                new_name = f"프로파일 {st.session_state.next_profile_num}"
+                st.session_state.profiles[new_name] = create_profile_template()
+                st.session_state.next_profile_num += 1
+                st.rerun()
+            else:
+                st.warning("최대 10개까지만 추가할 수 있습니다.")
+
+    with col2:
+        if st.button("✅ 저장하고 계산하기", type="primary", use_container_width=True):
+            with st.spinner("데이터 처리 중..."):
+                new_names = {name: data['new_name'] for name, data in edited_data.items()}
+                if len(set(new_names.values())) != len(new_names):
+                    st.error("프로파일 이름이 중복될 수 없습니다.")
+                    return
+
+                updated_profiles = {}
+                for old_name, data in edited_data.items():
+                    new_name = data['new_name']
+                    processed_table = process_profile_data(data['table'], input_method)
+                    updated_profiles[new_name] = processed_table
+                
+                st.session_state.profiles = updated_profiles
+            st.success("데이터 저장 및 계산 완료!")
+            st.session_state.show_editor = False # --- FIX: 팝업 닫기 ---
             st.rerun()
-        else:
-            st.warning("최대 10개까지만 추가할 수 있습니다.")
-
-    # 최종 저장 버튼
-    if st.button("✅ 저장하고 계산하기", type="primary", use_container_width=True):
-        with st.spinner("데이터 처리 중..."):
-            new_names = {name: data['new_name'] for name, data in edited_data.items()}
-            if len(set(new_names.values())) != len(new_names):
-                st.error("프로파일 이름이 중복될 수 없습니다.")
-                return
-
-            updated_profiles = {}
-            for old_name, data in edited_data.items():
-                new_name = data['new_name']
-                processed_table = process_profile_data(data['table'], input_method)
-                updated_profiles[new_name] = processed_table
             
-            st.session_state.profiles = updated_profiles
-        st.success("데이터 저장 및 계산 완료!")
-        st.rerun()
+    with col3:
+        if st.button("❌ 닫기", use_container_width=True):
+            st.session_state.show_editor = False # --- FIX: 팝업 닫기 ---
+            st.rerun()
 
 
 # ==============================================================================
 # 메인 UI 렌더링
 # ==============================================================================
-st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v9.3")
-st.title("☕ 이카와 로스팅 프로파일 계산 툴 v9.3 (성능 개선)")
+st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v9.4")
+st.title("☕ 이카와 로스팅 프로파일 계산 툴 v9.4 (성능 개선)")
 
 st.info("아래 '프로파일 데이터 관리' 버튼을 눌러 데이터를 수정하세요.")
 
 if st.button("📝 프로파일 데이터 관리", use_container_width=True, type="primary"):
+    st.session_state.show_editor = True # --- FIX: 팝업 열기 상태로 변경 ---
+    st.rerun()
+
+# --- FIX: 상태에 따라 팝업을 호출하는 로직 추가 ---
+if st.session_state.show_editor:
     profile_editor_dialog()
 
 # --- 사이드바 (그래프 표시 옵션) ---
