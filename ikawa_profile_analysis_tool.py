@@ -59,34 +59,6 @@ def process_profile_data(df: pd.DataFrame, main_input_method: str) -> pd.DataFra
     final_df.update(valid_rows.set_index('번호'))
     return final_df.reset_index()
 
-def display_hover_info(hovered_time, selected_profiles, profiles_data, colors):
-    """그래프 호버 시 분석 패널에 정보를 표시합니다."""
-    st.markdown("#### 분석 정보")
-    if hovered_time is None or not profiles_data or not selected_profiles:
-        st.info("그래프 위에 마우스를 올리면 상세 정보가 표시됩니다.")
-        return
-        
-    hover_sec = int(hovered_time)
-    st.markdown(f"**{hover_sec // 60}분 {hover_sec % 60:02d}초 ({hover_sec}초)**")
-    st.divider()
-
-    for i, name in enumerate(selected_profiles):
-        if name in profiles_data:
-            df_calc = profiles_data.get(name)
-            if df_calc is None or df_calc.empty: continue
-            
-            color = colors[i % len(colors)]
-            valid_calc = df_calc.dropna(subset=['누적(초)'])
-            segment_search = valid_calc[valid_calc['누적(초)'] <= hover_sec]
-            if segment_search.empty: continue
-            
-            segment = segment_search.iloc[-1]
-            st.markdown(
-                f"<span style='color:{color};'>●</span> **{name}**: 포인트 {int(segment['번호'])} ({segment['온도℃']:.1f}℃) 구간 | "
-                f"**ROR:** {segment['ROR(초당)']:.3f}℃/s", 
-                unsafe_allow_html=True
-            )
-
 # ==============================================================================
 # 상태(Session State) 초기화
 # ==============================================================================
