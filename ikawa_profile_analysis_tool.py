@@ -7,10 +7,9 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from streamlit_plotly_events import plotly_events
-import io
 
 # ==============================================================================
-# 핵심 함수
+# 핵심 함수 (보간 기능 완전 제거)
 # ==============================================================================
 
 def create_profile_template():
@@ -26,19 +25,14 @@ def create_profile_template():
 def process_profile_data(df: pd.DataFrame, main_input_method: str) -> pd.DataFrame | None:
     """단일 프로파일 DF를 받아 모든 시간/ROR 계산을 수행합니다."""
     processed_df = df.copy()
-    cols_to_numeric = ['온도℃']
-    if main_input_method == '시간 입력':
-        cols_to_numeric.extend(['분', '초'])
-    else:
-        cols_to_numeric.append('구간(초)')
-
+    cols_to_numeric = ['온도℃', '분', '초', '구간(초)']
     for col in cols_to_numeric:
         if col in processed_df.columns:
             processed_df[col] = pd.to_numeric(processed_df[col], errors='coerce')
 
+    # '온도' 열에 유효한 값이 있는 행만 남깁니다.
     processed_df.dropna(subset=['온도℃'], inplace=True)
-    if processed_df.empty: return None
-    
+    if processed_df.empty: return create_profile_template()
     processed_df.reset_index(drop=True, inplace=True)
     processed_df.insert(0, '번호', processed_df.index)
 
@@ -65,7 +59,7 @@ def process_profile_data(df: pd.DataFrame, main_input_method: str) -> pd.DataFra
     return final_df
 
 def display_hover_info(hovered_time, selected_profiles, graph_data, colors):
-    """그래프 호버 시 분석 패널에 정보를 표시합니다. (보간 기능 완전 제거)"""
+    """그래프 호버 시 분석 패널에 정보를 표시합니다. (보간 기능 없음)"""
     st.markdown("#### 분석 정보")
     if hovered_time is None or not graph_data:
         st.info("그래프 위에 마우스를 올리면 상세 정보가 표시됩니다.")
@@ -73,8 +67,6 @@ def display_hover_info(hovered_time, selected_profiles, graph_data, colors):
         
     hover_sec = int(hovered_time)
     
-    # --- [수정] 시간 헤더 표시 로직 변경 ---
-    # 이제 보간 없이, 단순히 호버된 시간만 표시합니다.
     st.markdown(f"**{hover_sec // 60}분 {hover_sec % 60:02d}초 ({hover_sec}초)**")
     st.divider()
 
@@ -86,7 +78,8 @@ def display_hover_info(hovered_time, selected_profiles, graph_data, colors):
             color = colors[i % len(colors)]
             
             # 호버된 시간 바로 이전의 데이터 포인트를 찾습니다.
-            current_segment_search = df_calc[df_calc['누적(초)'] <= hover_sec].dropna(subset=['누적(초)'])
+            valid_calc = df_calc.dropna(subset=['누적(초)'])
+            current_segment_search = valid_calc[valid_calc['누적(초)'] <= hover_sec]
             if current_segment_search.empty: continue
             current_segment = current_segment_search.iloc[-1]
             
@@ -94,38 +87,11 @@ def display_hover_info(hovered_time, selected_profiles, graph_data, colors):
             current_temp = current_segment['온도℃']
             point_num = current_segment['번호']
 
-            # [수정] 이제 포인트 위인지, 사이인지 구분할 필요 없이
-            # 항상 이전 포인트의 정보를 기준으로 표시합니다.
             st.markdown(f"<span style='color:{color};'>●</span> **{name}**: 포인트 {int(point_num)} ({current_temp:.1f}℃) 구간의 ROR은 초당 {current_ror:.3f}℃ 입니다.", unsafe_allow_html=True)
 
-
-@st.cache_data
-def create_template_excel(format_type):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        if format_type == '시간 입력':
-            df_template = pd.DataFrame({'온도℃': [120, 140, 160], '분': [0, 0, 1], '초': [0, 40, 23]})
-        else: # 구간 입력
-            df_template = pd.DataFrame({'온도℃': [120, 140, 160], '구간(초)': [np.nan, 40, 43]})
-        
-        df_final = pd.DataFrame()
-        df_final['A'] = pd.Series(['프로파일 A', df_template.columns[0]] + list(df_template.iloc[:, 0]))
-        if format_type == '시간 입력':
-            df_final['B'] = pd.Series(['', df_template.columns[1]] + list(df_template.iloc[:, 1]))
-            df_final['C'] = pd.Series(['', df_template.columns[2]] + list(df_template.iloc[:, 2]))
-        else:
-            df_final['B'] = pd.Series(['', df_template.columns[1]] + list(df_template.iloc[:, 1]))
-
-        df_final.to_excel(writer, sheet_name='profiles', index=False, header=False)
-    return output.getvalue()
-
 # ==============================================================================
-# UI 렌더링
+# 상태(Session State) 초기화
 # ==============================================================================
-st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v9.0")
-st.title("☕ 이카와 로스팅 프로파일 계산 툴 v9.0 (최종 안정화 버전)")
-
-# --- Session State 초기화 ---
 if 'profiles' not in st.session_state:
     st.session_state.profiles = { f"프로파일 {i+1}": create_profile_template() for i in range(3) }
 if 'main_input_method' not in st.session_state: st.session_state.main_input_method = '시간 입력'
@@ -134,8 +100,12 @@ if 'next_profile_num' not in st.session_state: st.session_state.next_profile_num
 if 'graph_data' not in st.session_state: st.session_state.graph_data = {}
 if 'data_synced' not in st.session_state: st.session_state.data_synced = False
 
+# ==============================================================================
+# UI 렌더링
+# ==============================================================================
+st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v9.0")
+st.title("☕ 이카와 로스팅 프로파일 계산 툴 v9.0 (Final)")
 
-# --- 사이드바 ---
 with st.sidebar:
     st.header("④ 보기 옵션")
     selected_profiles = [name for name in st.session_state.profiles.keys() if st.checkbox(name, value=True, key=f"select_{name}")]
@@ -147,7 +117,6 @@ with st.sidebar:
         st.write("`profiles` 개수: ", len(st.session_state.profiles))
         st.write("`graph_data` 개수: ", len(st.session_state.graph_data))
 
-# --- 데이터 입력 UI ---
 st.header("① 데이터 입력")
 st.radio("입력 방식", ['시간 입력', '구간 입력'], horizontal=True, key="main_input_method")
 
@@ -183,6 +152,7 @@ if sync_submitted:
                 st.error("프로파일 이름이 중복될 수 없습니다.")
             else:
                 new_profiles = {}
+                # 순서 유지를 위해 form_data 순서대로 딕셔너리 재구성
                 for old_name, data in form_data.items():
                     new_profiles[data['new_name']] = st.session_state.profiles[old_name]
                 st.session_state.profiles = new_profiles
@@ -244,5 +214,5 @@ with col_graph:
 
 with col_info:
     last_hovered_time = selected_points[0]['x'] if selected_points else None
-    display_hover_info(last_hovered_time, selected_profiles, st.session_state.graph_data, px.colors.qualitative.Plotly)
+    display_hover_info(last_hovered_time, selected_profiles, st.session_state.graph_data, colors)
 
