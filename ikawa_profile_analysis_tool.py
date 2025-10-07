@@ -68,10 +68,22 @@ st.title('☕ Ikawa Profile Analysis Tool')
 # --- Session State 초기화 ---
 if 'profiles' not in st.session_state or not st.session_state.profiles:
     st.session_state.profiles = {'프로파일 1': create_new_profile(), '프로파일 2': create_new_profile(), '프로파일 3': create_new_profile()}
-if 'graph_data' not in st.session_state:
-    st.session_state.graph_data = None
-if 'graph_button_enabled' not in st.session_state:
-    st.session_state.graph_button_enabled = False
+if 'graph_data' not in st.session_state: st.session_state.graph_data = None
+if 'graph_button_enabled' not in st.session_state: st.session_state.graph_button_enabled = False
+
+# --- 상단 프로파일 관리 UI ---
+st.subheader("프로파일 관리")
+if len(st.session_state.profiles) < 10:
+    if st.button("＋ 새 프로파일 추가"):
+        new_profile_num = 1
+        while f"프로파일 {new_profile_num}" in st.session_state.profiles:
+            new_profile_num += 1
+        st.session_state.profiles[f"프로파일 {new_profile_num}"] = create_new_profile()
+        st.rerun()
+else:
+    st.warning("최대 10개의 프로파일까지 추가할 수 있습니다.")
+
+st.divider()
 
 # --- 데이터 입력 UI (컬럼) ---
 profile_names = list(st.session_state.profiles.keys())
@@ -80,8 +92,15 @@ cols = st.columns(len(profile_names))
 for i, col in enumerate(cols):
     current_name = profile_names[i]
     with col:
-        st.subheader(f"📄 {current_name}")
-        new_name = st.text_input("프로파일 이름 수정", value=current_name, key=f"name_input_{current_name}", label_visibility="collapsed")
+        # --- 이름 변경 및 삭제 UI ---
+        col1, col2 = st.columns([0.8, 0.2])
+        with col1:
+            new_name = st.text_input("프로파일 이름", value=current_name, key=f"name_input_{current_name}", label_visibility="collapsed")
+        with col2:
+            if st.button("삭제", key=f"delete_button_{current_name}"):
+                del st.session_state.profiles[current_name]
+                st.rerun()
+        
         if new_name != current_name:
             if new_name in st.session_state.profiles: st.error("이름 중복!")
             elif not new_name: st.error("이름은 비워둘 수 없습니다.")
@@ -89,10 +108,11 @@ for i, col in enumerate(cols):
                 new_profiles = {new_name if name == current_name else name: df for name, df in st.session_state.profiles.items()}
                 st.session_state.profiles = new_profiles
                 st.rerun()
+
         st.divider()
         st.subheader("데이터 입력")
         main_input_method = st.radio("입력 방식", ("시간 입력", "구간 입력"), key=f"main_input_{current_name}", horizontal=True)
-        sub_input_method = st.radio("입력 방법", ("기본", "엑셀 데이터 붙여넣기"), key=f"sub_input_{current_name}", horizontal=True, label_visibility="collapsed")
+        sub_input_method = st.radio("입력 방법", ("기본", "엑셀 붙여넣기"), key=f"sub_input_{current_name}", horizontal=True, label_visibility="collapsed")
         
         edited_df = st.session_state.profiles[current_name]
         text_area_content = ""
@@ -123,33 +143,19 @@ for i, col in enumerate(cols):
 
 st.divider()
 
-# --- 액션 버튼 및 그래프 표시 UI ---
+# --- 그래프 표시 UI ---
 graph_container = st.container()
 with graph_container:
     st.header("📈 그래프 및 분석")
-    
     if st.button("📊 그래프 업데이트", disabled=not st.session_state.graph_button_enabled):
-        processed_profiles = {}
-        for name, df in st.session_state.profiles.items():
-            processed_profiles[name] = calculate_ror(df.copy())
-        
+        processed_profiles = {name: calculate_ror(df.copy()) for name, df in st.session_state.profiles.items()}
         fig = go.Figure()
         for name, df in processed_profiles.items():
             valid_df = df.dropna(subset=['누적 시간 (초)', '온도'])
             if not valid_df.empty:
                 fig.add_trace(go.Scatter(x=valid_df['누적 시간 (초)'], y=valid_df['온도'], mode='lines+markers', name=name, yaxis='y1'))
                 fig.add_trace(go.Scatter(x=valid_df['누적 시간 (초)'], y=valid_df['ROR (℃/sec)'], mode='lines', name=f'{name} ROR', yaxis='y2', line=dict(dash='dot')))
-
-        fig.update_layout(
-            xaxis_title='시간 (초)',
-            yaxis_title='온도 (°C)',
-            yaxis2=dict(title='ROR (℃/sec)', overlaying='y', side='right'),
-            xaxis=dict(range=[0, 360]),
-            yaxis=dict(range=[85, 235]),
-            yaxis2_range=[0, 0.75],
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
+        fig.update_layout(xaxis_title='시간 (초)', yaxis_title='온도 (°C)', yaxis2=dict(title='ROR (℃/sec)', overlaying='y', side='right'), xaxis=dict(range=[0, 360]), yaxis=dict(range=[85, 235]), yaxis2_range=[0, 0.75], legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.session_state.graph_data = fig
-    
     if st.session_state.graph_data:
         st.plotly_chart(st.session_state.graph_data, use_container_width=True)
