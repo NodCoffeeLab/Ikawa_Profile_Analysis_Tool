@@ -1,4 +1,4 @@
-# Ikawa Profile Analysis Tool (v11.0 Major Rework for Simplicity & Performance)
+# Ikawa Profile Analysis Tool (v12.0 Major Rework with Tabs for Performance)
 # -*- coding: utf-8 -*-
 
 import streamlit as st
@@ -90,11 +90,9 @@ def display_hover_info(hovered_time, selected_profiles, profiles_data, colors):
 # 상태(Session State) 초기화
 # ==============================================================================
 if 'profiles' not in st.session_state:
-    # 데이터 입력을 위한 상태
     st.session_state.profiles = { f"프로파일 {i+1}": create_profile_template() for i in range(3) }
 if 'graph_data' not in st.session_state:
-    # 그래프를 그리기 위한 별도의 상태
-    st.session_state.graph_data = {}
+    st.session_state.graph_data = st.session_state.profiles.copy() # 초기 그래프 데이터 생성
 if 'next_profile_num' not in st.session_state:
     st.session_state.next_profile_num = 4
 if 'input_method' not in st.session_state:
@@ -103,13 +101,12 @@ if 'input_method' not in st.session_state:
 # ==============================================================================
 # 메인 UI 렌더링
 # ==============================================================================
-st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v11.0")
-st.title("☕ 이카와 로스팅 프로파일 계산 툴 v11.0 (초기 버전의 편의성과 속도를 되찾기 위한 구조 변경)")
+st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v12.0")
+st.title("☕ 이카와 로스팅 프로파일 계산 툴 v12.0 (탭 UI 기반 성능 최적화)")
 
 # --- 사이드바 ---
 with st.sidebar:
     st.header("그래프 보기 옵션")
-    # 그래프 데이터 기준으로 체크박스 생성
     profile_keys = list(st.session_state.graph_data.keys())
     selected_profiles = [name for name in profile_keys if st.checkbox(name, value=True, key=f"view_select_{name}")]
     st.divider()
@@ -119,21 +116,23 @@ with st.sidebar:
 st.header("① 데이터 입력 및 수정")
 st.radio("입력 방식", ['시간 입력', '구간 입력'], key="input_method", horizontal=True)
 
-# --- 데이터 편집 UI ---
-profile_cols = st.columns(len(st.session_state.profiles))
-edited_data = {}
+# --- 데이터 편집 UI (탭 사용) ---
+profile_tabs = st.tabs(list(st.session_state.profiles.keys()))
+edited_data_from_ui = {}
 
-for i, name in enumerate(list(st.session_state.profiles.keys())):
-    with profile_cols[i]:
-        edited_data[name] = {}
+for i, tab in enumerate(profile_tabs):
+    name = list(st.session_state.profiles.keys())[i]
+    with tab:
+        edited_data_from_ui[name] = {}
         
         sub_cols = st.columns([4, 1])
         with sub_cols[0]:
-            edited_data[name]['new_name'] = st.text_input("프로파일 이름", value=name, key=f"rename_{name}")
+            edited_data_from_ui[name]['new_name'] = st.text_input("프로파일 이름", value=name, key=f"rename_{name}")
         with sub_cols[1]:
-            st.write(" ")
+            st.write(" ") # 높이 맞춤용
             if st.button("🗑️", key=f"delete_{name}", help=f"{name} 프로파일 삭제"):
                 del st.session_state.profiles[name]
+                del st.session_state.graph_data[name]
                 st.rerun()
         
         column_config = { "번호": st.column_config.NumberColumn(disabled=True) }
@@ -143,7 +142,8 @@ for i, name in enumerate(list(st.session_state.profiles.keys())):
             else: hidden_cols.extend(["분", "초"])
             for col in hidden_cols: column_config[col] = None
 
-        edited_data[name]['table'] = st.data_editor(
+        # data_editor의 변경사항은 즉시 edited_data_from_ui에 저장됩니다.
+        edited_data_from_ui[name]['table'] = st.data_editor(
             st.session_state.profiles[name], 
             key=f"editor_{name}_{st.session_state.input_method}",
             num_rows="dynamic", height=500, column_config=column_config
@@ -155,19 +155,19 @@ action_cols = st.columns(2)
 with action_cols[0]:
     if st.button("🔄 계산 및 그래프 업데이트", use_container_width=True, type="primary"):
         with st.spinner("데이터 처리 및 그래프 생성 중..."):
-            new_names = {name: data['new_name'] for name, data in edited_data.items()}
+            new_names = {name: data['new_name'] for name, data in edited_data_from_ui.items()}
             if len(set(new_names.values())) != len(new_names):
                 st.error("프로파일 이름이 중복될 수 없습니다.")
             else:
-                calculated_profiles = {}
-                for old_name, data in edited_data.items():
+                updated_profiles = {}
+                for old_name, data in edited_data_from_ui.items():
                     new_name = data['new_name']
-                    # 계산된 데이터는 state.profiles와 graph_data 모두에 저장
+                    # 계산은 버튼을 눌렀을 때만 실행됩니다.
                     processed_table = process_profile_data(data['table'], st.session_state.input_method)
-                    calculated_profiles[new_name] = processed_table
+                    updated_profiles[new_name] = processed_table
                 
-                st.session_state.profiles = calculated_profiles
-                st.session_state.graph_data = calculated_profiles # 그래프용 데이터 업데이트
+                st.session_state.profiles = updated_profiles
+                st.session_state.graph_data = updated_profiles
                 st.success("업데이트 완료!")
                 st.rerun()
 
@@ -176,6 +176,8 @@ with action_cols[1]:
         if len(st.session_state.profiles) < 10:
             new_name = f"프로파일 {st.session_state.next_profile_num}"
             st.session_state.profiles[new_name] = create_profile_template()
+            # 새 프로파일이 그래프에도 즉시 반영되도록 추가
+            st.session_state.graph_data[new_name] = st.session_state.profiles[new_name]
             st.session_state.next_profile_num += 1
             st.rerun()
         else:
@@ -193,7 +195,7 @@ with col_graph:
     if not st.session_state.graph_data:
         st.info("데이터를 입력/수정한 후 '계산 및 그래프 업데이트' 버튼을 눌러주세요.")
     else:
-        for i, name in enumerate(selected_profiles): # 사이드바에서 선택된 프로파일만 그림
+        for i, name in enumerate(selected_profiles):
             if name in st.session_state.graph_data:
                 df_calc = st.session_state.graph_data.get(name)
                 color = colors[i % len(colors)]
@@ -204,7 +206,15 @@ with col_graph:
                         if show_ror_graph:
                             fig.add_trace(go.Scatter(x=valid_points['누적(초)'], y=valid_points['ROR(초당)'], name=f'{name} - ROR', mode='lines+markers', line=dict(color=color, dash='dot'), yaxis='y2', marker=dict(size=8)))
     
-    fig.update_layout(height=600, xaxis=dict(title='시간 합계 (초)'), yaxis=dict(title='온도 (°C)'), yaxis2=dict(title='ROR(초당)', overlaying='y', side='right', range=[0, 0.75]), legend=dict(x=0, y=1.1, orientation='h'), hovermode='x unified')
+    # --- FIX: 그래프 축 범위 고정 ---
+    fig.update_layout(
+        height=600, 
+        xaxis=dict(title='시간 합계 (초)', range=[0, 360]), 
+        yaxis=dict(title='온도 (°C)', range=[85, 235]), 
+        yaxis2=dict(title='ROR(초당)', overlaying='y', side='right', range=[0, 0.75]), 
+        legend=dict(x=0, y=1.1, orientation='h'), 
+        hovermode='x unified'
+    )
     selected_points = plotly_events(fig, hover_event=True, key="graph_hover_events")
 
 with col_info:
