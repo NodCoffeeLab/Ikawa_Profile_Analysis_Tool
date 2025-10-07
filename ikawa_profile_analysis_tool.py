@@ -60,7 +60,7 @@ def calculate_ror(df):
 
 # --- UI 및 앱 실행 로직 ---
 st.set_page_config(layout="wide")
-st.title('☕ Ikawa Profile Analysis Tool')
+st.title('☕ Ikawa Profile Analysis Tool (25.10.08)')
 
 if 'profiles' not in st.session_state or not st.session_state.profiles:
     st.session_state.profiles = {'프로파일 1': create_new_profile(), '프로파일 2': create_new_profile(), '프로파일 3': create_new_profile()}
@@ -127,7 +127,7 @@ if st.button("📊 그래프 업데이트", disabled=not st.session_state.graph_
     st.session_state.selected_time = 0
 
 if st.session_state.processed_profiles:
-    graph_col, analysis_col = st.columns([0.7, 0.8])
+    graph_col, analysis_col = st.columns([0.7, 0.3])
     all_dfs = st.session_state.processed_profiles.values()
     valid_dfs = [df for df in all_dfs if df['누적 시간 (초)'].notna().sum() > 1]
     max_time = max(df['누적 시간 (초)'].max() for df in valid_dfs) if valid_dfs else 1
@@ -144,7 +144,9 @@ if st.session_state.processed_profiles:
         selected_time_int = int(st.session_state.get('selected_time', 0))
         fig.add_vline(x=selected_time_int, line_width=1, line_dash="dash", line_color="grey")
 
-        fig.update_layout(xaxis_title='시간 (초)', yaxis_title='온도 (°C)', yaxis=dict(range=[85, 235]), yaxis2=dict(title='ROR (℃/sec)', overlaying='y', side='right', range=[0, 0.75]), xaxis=dict(range=[0, 360]), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        fig.update_layout(
+            height=800,
+            xaxis_title='시간 (초)', yaxis_title='온도 (°C)', yaxis=dict(range=[85, 235]), yaxis2=dict(title='ROR (℃/sec)', overlaying='y', side='right', range=[0, 0.75]), xaxis=dict(range=[0, 360]), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig, use_container_width=True)
 
     with analysis_col:
