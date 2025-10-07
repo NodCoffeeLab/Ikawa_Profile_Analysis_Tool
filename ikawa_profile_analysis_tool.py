@@ -37,11 +37,11 @@ def parse_excel_data(text_data, mode):
         try:
             if mode == '시간 입력':
                 if len(parts) >= 3: row['온도'], row['분'], row['초'] = float(parts[0]), int(parts[1]), int(parts[2])
-                elif len(parts) == 1: row['온도'], row['분'], row['초'] = float(parts[0]), 0, 0
+                elif len(parts) >= 1: row['온도'], row['분'], row['초'] = float(parts[0]), 0, 0
                 else: continue
             elif mode == '구간 입력':
                 if len(parts) >= 2: row['온도'], row['구간 시간 (초)'] = float(parts[0]), int(parts[1])
-                elif len(parts) == 1: row['온도'], row['구간 시간 (초)'] = float(parts[0]), 0
+                elif len(parts) >= 1: row['온도'], row['구간 시간 (초)'] = float(parts[0]), 0
                 else: continue
             new_data.append(row)
         except (ValueError, IndexError): continue
@@ -65,7 +65,6 @@ def calculate_ror(df):
 st.set_page_config(layout="wide")
 st.title('☕ Ikawa Profile Analysis Tool')
 
-# --- Session State 초기화 ---
 if 'profiles' not in st.session_state or not st.session_state.profiles:
     st.session_state.profiles = {'프로파일 1': create_new_profile(), '프로파일 2': create_new_profile(), '프로파일 3': create_new_profile()}
 if 'graph_data' not in st.session_state: st.session_state.graph_data = None
@@ -75,9 +74,10 @@ if 'graph_button_enabled' not in st.session_state: st.session_state.graph_button
 st.subheader("프로파일 관리")
 if len(st.session_state.profiles) < 10:
     if st.button("＋ 새 프로파일 추가"):
-        new_profile_num = 1
-        while f"프로파일 {new_profile_num}" in st.session_state.profiles:
-            new_profile_num += 1
+        # 기존 프로파일 이름에서 숫자 부분만 추출
+        existing_nums = [int(name.split(' ')[1]) for name in st.session_state.profiles.keys() if name.startswith("프로파일 ") and name.split(' ')[1].isdigit()]
+        # 가장 큰 숫자 + 1 로 새 프로파일 번호 결정 (재사용 방지)
+        new_profile_num = max(existing_nums) + 1 if existing_nums else 1
         st.session_state.profiles[f"프로파일 {new_profile_num}"] = create_new_profile()
         st.rerun()
 else:
@@ -92,7 +92,6 @@ cols = st.columns(len(profile_names))
 for i, col in enumerate(cols):
     current_name = profile_names[i]
     with col:
-        # --- 이름 변경 및 삭제 UI ---
         col1, col2 = st.columns([0.8, 0.2])
         with col1:
             new_name = st.text_input("프로파일 이름", value=current_name, key=f"name_input_{current_name}", label_visibility="collapsed")
@@ -100,7 +99,6 @@ for i, col in enumerate(cols):
             if st.button("삭제", key=f"delete_button_{current_name}"):
                 del st.session_state.profiles[current_name]
                 st.rerun()
-        
         if new_name != current_name:
             if new_name in st.session_state.profiles: st.error("이름 중복!")
             elif not new_name: st.error("이름은 비워둘 수 없습니다.")
@@ -111,8 +109,9 @@ for i, col in enumerate(cols):
 
         st.divider()
         st.subheader("데이터 입력")
+        # --- 라디오 버튼 UI (다시 추가) ---
         main_input_method = st.radio("입력 방식", ("시간 입력", "구간 입력"), key=f"main_input_{current_name}", horizontal=True)
-        sub_input_method = st.radio("입력 방법", ("기본", "엑셀 붙여넣기"), key=f"sub_input_{current_name}", horizontal=True, label_visibility="collapsed")
+        sub_input_method = st.radio("입력 방법", ("기본", "엑셀 데이터 붙여넣기"), key=f"sub_input_{current_name}", horizontal=True)
         
         edited_df = st.session_state.profiles[current_name]
         text_area_content = ""
