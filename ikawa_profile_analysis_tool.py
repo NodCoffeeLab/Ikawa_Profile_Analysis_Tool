@@ -1,4 +1,4 @@
-# Ikawa Profile Analysis Tool (v9.5 Refactored for Performance)
+# Ikawa Profile Analysis Tool (v10.0 Major Performance Rework)
 # -*- coding: utf-8 -*-
 
 import streamlit as st
@@ -50,7 +50,6 @@ def process_profile_data(df: pd.DataFrame, main_input_method: str) -> pd.DataFra
 
     temp_diff = valid_rows['온도℃'].diff()
     time_diff = valid_rows['구간(초)']
-    
     ror_per_sec = np.divide(temp_diff, time_diff, out=np.zeros_like(temp_diff, dtype=float), where=time_diff.fillna(0) != 0)
     valid_rows['ROR(초당)'] = pd.Series(ror_per_sec).fillna(0)
     
@@ -59,6 +58,34 @@ def process_profile_data(df: pd.DataFrame, main_input_method: str) -> pd.DataFra
     final_df.update(valid_rows.set_index('번호'))
     return final_df.reset_index()
 
+def display_hover_info(hovered_time, selected_profiles, profiles_data, colors):
+    """그래프 호버 시 분석 패널에 정보를 표시합니다."""
+    st.markdown("#### 분석 정보")
+    if hovered_time is None or not profiles_data or not selected_profiles:
+        st.info("그래프 위에 마우스를 올리면 상세 정보가 표시됩니다.")
+        return
+        
+    hover_sec = int(hovered_time)
+    st.markdown(f"**{hover_sec // 60}분 {hover_sec % 60:02d}초 ({hover_sec}초)**")
+    st.divider()
+
+    for i, name in enumerate(selected_profiles):
+        if name in profiles_data:
+            df_calc = profiles_data.get(name)
+            if df_calc is None or df_calc.empty: continue
+            
+            color = colors[i % len(colors)]
+            valid_calc = df_calc.dropna(subset=['누적(초)'])
+            segment_search = valid_calc[valid_calc['누적(초)'] <= hover_sec]
+            if segment_search.empty: continue
+            
+            segment = segment_search.iloc[-1]
+            st.markdown(
+                f"<span style='color:{color};'>●</span> **{name}**: 포인트 {int(segment['번호'])} ({segment['온도℃']:.1f}℃) 구간 | "
+                f"**ROR:** {segment['ROR(초당)']:.3f}℃/s", 
+                unsafe_allow_html=True
+            )
+
 # ==============================================================================
 # 상태(Session State) 초기화
 # ==============================================================================
@@ -66,77 +93,69 @@ if 'profiles' not in st.session_state:
     st.session_state.profiles = { f"프로파일 {i+1}": create_profile_template() for i in range(3) }
 if 'next_profile_num' not in st.session_state:
     st.session_state.next_profile_num = 4
-if 'show_editor' not in st.session_state:
-    st.session_state.show_editor = False
+if 'mode' not in st.session_state:
+    st.session_state.mode = 'view' # 'view' 또는 'edit'
 if 'active_profile_in_editor' not in st.session_state:
     st.session_state.active_profile_in_editor = None
+if 'input_method' not in st.session_state:
+    st.session_state.input_method = '시간 입력'
 
 # ==============================================================================
-# 데이터 수정용 팝업(Dialog) 함수 (성능 개선)
+# "수정 모드" UI 함수
 # ==============================================================================
-@st.dialog("프로파일 데이터 관리")
-def profile_editor_dialog():
-    st.markdown("#### 데이터 입력 및 수정")
-    input_method = st.radio("입력 방식", ['시간 입력', '구간 입력'], key="dialog_input_method", horizontal=True)
-
-    # --- REFACTOR: 탭 대신 셀렉트박스를 사용하여 한 번에 하나의 프로파일만 편집 ---
-    profile_keys = list(st.session_state.profiles.keys())
+def edit_mode_ui():
+    st.set_page_config(layout="centered", page_title="프로파일 수정 - 이카와 툴")
+    st.title("✍️ 프로파일 데이터 수정")
     
-    # 현재 활성화된 프로파일이 유효한지 확인합니다.
-    if st.session_state.active_profile_in_editor not in profile_keys:
-        st.session_state.active_profile_in_editor = profile_keys[0] if profile_keys else None
+    st.info("데이터 수정을 마친 후, '수정 완료' 버튼을 눌러 그래프를 확인하세요.")
+    
+    st.radio("입력 방식", ['시간 입력', '구간 입력'], key="input_method", horizontal=True)
 
-    if st.session_state.active_profile_in_editor:
-        # 셀렉트박스의 상태를 session_state와 연결하여 제어합니다.
-        st.selectbox(
-            "수정할 프로파일 선택",
-            options=profile_keys,
-            key='active_profile_in_editor'
-        )
-        
-        active_profile_name = st.session_state.active_profile_in_editor
+    profile_keys = list(st.session_state.profiles.keys())
+    if not profile_keys:
+        st.warning("프로파일이 없습니다. 먼저 프로파일을 추가해주세요.")
+    else:
+        if st.session_state.active_profile_in_editor not in profile_keys:
+            st.session_state.active_profile_in_editor = profile_keys[0]
+
+        st.selectbox("수정할 프로파일 선택", options=profile_keys, key='active_profile_in_editor')
+        active_name = st.session_state.active_profile_in_editor
         
         st.divider()
         
         sub_cols = st.columns([4, 1])
         with sub_cols[0]:
-            new_name = st.text_input("프로파일 이름", value=active_profile_name, key=f"d_rename_{active_profile_name}")
+            new_name = st.text_input("프로파일 이름", value=active_name, key=f"rename_{active_name}")
         with sub_cols[1]:
-            if st.button("🗑️ 삭제", key=f"d_delete_{active_profile_name}", use_container_width=True):
-                del st.session_state.profiles[active_profile_name]
+            st.write(" ") # 공백으로 높이 맞춤
+            if st.button("🗑️ 삭제", key=f"delete_{active_name}", use_container_width=True):
+                del st.session_state.profiles[active_name]
                 st.session_state.active_profile_in_editor = None
                 st.rerun()
 
-        # 이름 변경을 실시간으로 처리합니다.
-        if new_name != active_profile_name:
+        if new_name != active_name:
             if new_name in st.session_state.profiles:
                 st.error("프로파일 이름이 중복될 수 없습니다.")
             else:
-                st.session_state.profiles[new_name] = st.session_state.profiles.pop(active_profile_name)
+                st.session_state.profiles[new_name] = st.session_state.profiles.pop(active_name)
                 st.session_state.active_profile_in_editor = new_name
                 st.rerun()
-                
+
         column_config = { "번호": st.column_config.NumberColumn(disabled=True) }
         hidden_cols = ['누적(초)', 'ROR(초당)']
-        if input_method == '시간 입력': hidden_cols.append("구간(초)")
+        if st.session_state.input_method == '시간 입력': hidden_cols.append("구간(초)")
         else: hidden_cols.extend(["분", "초"])
         for col in hidden_cols: column_config[col] = None
         
-        # 데이터 에디터의 변경사항을 session_state에 실시간으로 반영합니다.
         edited_df = st.data_editor(
-            st.session_state.profiles[active_profile_name], 
-            key=f"d_editor_{active_profile_name}_{input_method}", 
-            num_rows="dynamic",
-            height=500,
-            column_config=column_config
+            st.session_state.profiles[active_name], 
+            key=f"editor_{active_name}_{st.session_state.input_method}", 
+            num_rows="dynamic", height=500, column_config=column_config
         )
-        st.session_state.profiles[active_profile_name] = edited_df
-
-    else:
-        st.warning("프로파일이 없습니다. 먼저 프로파일을 추가해주세요.")
+        st.session_state.profiles[active_name] = edited_df
 
     st.divider()
-    col1, col2, col3 = st.columns([2,2,1])
+    col1, col2 = st.columns(2)
     with col1:
         if st.button("＋ 프로파일 추가", use_container_width=True):
             if len(st.session_state.profiles) < 10:
@@ -149,78 +168,68 @@ def profile_editor_dialog():
                 st.warning("최대 10개까지만 추가할 수 있습니다.")
 
     with col2:
-        if st.button("✅ 계산하고 닫기", type="primary", use_container_width=True):
+        if st.button("✅ 수정 완료 및 그래프 보기", use_container_width=True, type="primary"):
             with st.spinner("데이터 처리 중..."):
                 calculated_profiles = {}
                 for name, df in st.session_state.profiles.items():
-                    calculated_profiles[name] = process_profile_data(df, input_method)
+                    calculated_profiles[name] = process_profile_data(df, st.session_state.input_method)
                 st.session_state.profiles = calculated_profiles
-                
-            st.success("데이터 계산 완료!")
-            st.session_state.show_editor = False
-            st.rerun()
-            
-    with col3:
-        if st.button("❌ 닫기", use_container_width=True):
-            st.session_state.show_editor = False
+            st.session_state.mode = 'view'
             st.rerun()
 
 # ==============================================================================
-# 메인 UI 렌더링
+# "보기 모드" UI 함수
 # ==============================================================================
-st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v9.5")
-st.title("☕ 이카와 로스팅 프로파일 계산 툴 v9.5 (성능 개선)")
+def view_mode_ui():
+    st.set_page_config(layout="wide", page_title="이카와 로스팅 프로파일 계산 툴 v10.0")
+    st.title("☕ 이카와 로스팅 프로파일 계산 툴 v10.0 (대규모 성능 최적화)")
 
-st.info("아래 '프로파일 데이터 관리' 버튼을 눌러 데이터를 수정하세요.")
+    st.info("그래프를 확인하고, 데이터를 수정하려면 아래 '프로파일 수정하기' 버튼을 누르세요.")
+    if st.button("📝 프로파일 수정하기", use_container_width=True, type="primary"):
+        st.session_state.mode = 'edit'
+        if not st.session_state.active_profile_in_editor and st.session_state.profiles:
+            st.session_state.active_profile_in_editor = list(st.session_state.profiles.keys())[0]
+        st.rerun()
 
-if st.button("📝 프로파일 데이터 관리", use_container_width=True, type="primary"):
-    st.session_state.show_editor = True
-    st.rerun()
+    with st.sidebar:
+        st.header("그래프 보기 옵션")
+        profile_keys = list(st.session_state.profiles.keys())
+        selected_profiles = [name for name in profile_keys if st.checkbox(name, value=True, key=f"view_select_{name}")]
+        st.divider()
+        show_ror_graph = st.checkbox("ROR 그래프 표시", value=True)
 
-if st.session_state.show_editor:
-    profile_editor_dialog()
+    st.header("📊 그래프 및 분석")
+    col_graph, col_info = st.columns([3, 1])
 
-# --- 사이드바 (그래프 표시 옵션) ---
-with st.sidebar:
-    st.header("그래프 보기 옵션")
-    profile_keys = list(st.session_state.profiles.keys())
-    selected_profiles = [name for name in profile_keys if st.checkbox(name, value=True, key=f"select_{name}")]
-    st.divider()
-    show_ror_graph = st.checkbox("ROR 그래프 표시", value=True)
-    st.checkbox("계산된 열 모두 보기 (팝업창에 적용)", key="show_hidden_cols")
+    with col_graph:
+        fig = go.Figure()
+        colors = px.colors.qualitative.Plotly
+        if not st.session_state.profiles or not selected_profiles:
+            st.info("표시할 프로파일이 없거나 선택되지 않았습니다. 사이드바에서 프로파일을 선택해주세요.")
+        else:
+            for i, name in enumerate(selected_profiles):
+                if name in st.session_state.profiles:
+                    df_calc = st.session_state.profiles.get(name)
+                    color = colors[i % len(colors)]
+                    if df_calc is not None:
+                        valid_points = df_calc.dropna(subset=['온도℃', '누적(초)'])
+                        if not valid_points.empty:
+                            fig.add_trace(go.Scatter(x=valid_points['누적(초)'], y=valid_points['온도℃'], name=f'{name} - 온도', mode='lines+markers', line=dict(color=color), marker=dict(size=8)))
+                            if show_ror_graph:
+                                fig.add_trace(go.Scatter(x=valid_points['누적(초)'], y=valid_points['ROR(초당)'], name=f'{name} - ROR', mode='lines+markers', line=dict(color=color, dash='dot'), yaxis='y2', marker=dict(size=8)))
+        
+        fig.update_layout(height=600, xaxis=dict(title='시간 합계 (초)'), yaxis=dict(title='온도 (°C)'), yaxis2=dict(title='ROR(초당)', overlaying='y', side='right', range=[0, 0.75]), legend=dict(x=0, y=1.1, orientation='h'), hovermode='x unified')
+        selected_points = plotly_events(fig, hover_event=True, key="graph_hover_events")
 
-# --- 그래프 및 분석 패널 ---
-st.header("📊 그래프 및 분석")
-col_graph, col_info = st.columns([3, 1])
+    with col_info:
+        last_hovered_time = selected_points[0]['x'] if selected_points else None
+        display_hover_info(last_hovered_time, selected_profiles, st.session_state.profiles, colors)
 
-with col_graph:
-    fig = go.Figure()
-    colors = px.colors.qualitative.Plotly
-    
-    if not st.session_state.profiles or not selected_profiles:
-        st.info("데이터를 입력하고 '계산하고 닫기' 버튼을 눌러주세요.")
-    else:
-        for i, name in enumerate(selected_profiles):
-            if name in st.session_state.profiles:
-                df_calc = st.session_state.profiles.get(name)
-                color = colors[i % len(colors)]
-                if df_calc is not None:
-                    valid_points = df_calc.dropna(subset=['온도℃', '누적(초)'])
-                    if not valid_points.empty:
-                        fig.add_trace(go.Scatter(x=valid_points['누적(초)'], y=valid_points['온도℃'], name=f'{name} - 온도', mode='lines+markers', line=dict(color=color), marker=dict(size=8)))
-                        if show_ror_graph:
-                            fig.add_trace(go.Scatter(x=valid_points['누적(초)'], y=valid_points['ROR(초당)'], name=f'{name} - ROR', mode='lines+markers', line=dict(color=color, dash='dot'), yaxis='y2', marker=dict(size=8)))
-    
-    fig.update_layout(
-        height=600, 
-        xaxis=dict(title='시간 합계 (초)', range=[0, 360]), 
-        yaxis=dict(title='온도 (°C)', range=[85, 235]), 
-        yaxis2=dict(title='ROR(초당)', overlaying='y', side='right', range=[0, 0.75]), 
-        legend=dict(x=0, y=1.1, orientation='h'),
-        hovermode='x unified'
-    )
-    selected_points = plotly_events(fig, hover_event=True, key="graph_hover_events")
 
-with col_info:
-    last_hovered_time = selected_points[0]['x'] if selected_points else None
-    display_hover_info(last_hovered_time, selected_profiles, st.session_state.profiles, colors)
+# ==============================================================================
+# 메인 실행 로직: 모드에 따라 다른 UI 함수를 호출
+# ==============================================================================
+if st.session_state.mode == 'view':
+    view_mode_ui()
+else:
+    edit_mode_ui()
