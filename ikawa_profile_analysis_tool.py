@@ -127,7 +127,7 @@ if st.button("📊 그래프 업데이트", disabled=not st.session_state.graph_
     st.session_state.selected_time = 0
 
 if st.session_state.processed_profiles:
-    graph_col, analysis_col = st.columns([0.7, 0.3])
+    graph_col, analysis_col = st.columns([0.7, 0.8])
     all_dfs = st.session_state.processed_profiles.values()
     valid_dfs = [df for df in all_dfs if df['누적 시간 (초)'].notna().sum() > 1]
     max_time = max(df['누적 시간 (초)'].max() for df in valid_dfs) if valid_dfs else 1
