@@ -64,7 +64,7 @@ def calculate_ror(df):
 
 # --- UI 및 앱 실행 로직 ---
 st.set_page_config(layout="wide")
-st.title('☕ Ikawa Profile Analysis Tool (25.10.08)')
+st.title('☕ Ikawa Profile Analysis Tool (25.10.10)')
 
 if 'profiles' not in st.session_state or not st.session_state.profiles:
     st.session_state.profiles = {'프로파일 1': create_new_profile(), '프로파일 2': create_new_profile(), '프로파일 3': create_new_profile()}
