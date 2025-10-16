@@ -89,9 +89,9 @@ with st.sidebar:
     st.subheader("축 범위 조절")
     col1, col2 = st.columns(2)
     with col1:
-        x_min = st.number_input("X축 최소값", value=0); y_min = st.number_input("Y축(온도) 최소값", value=85); y2_min = st.number_input("보조Y축(ROR) 최소값", value=0.0, format="%.2f")
+        x_min = st.number_input("X축 최소값(초)", value=0); y_min = st.number_input("Y축(온도) 최소값", value=85); y2_min = st.number_input("보조Y축(ROR) 최소값", value=0.0, format="%.2f")
     with col2:
-        x_max = st.number_input("X축 최대값", value=360); y_max = st.number_input("Y축(온도) 최대값", value=235); y2_max = st.number_input("보조Y축(ROR) 최대값", value=0.75, format="%.2f")
+        x_max = st.number_input("X축 최대값(초)", value=360); y_max = st.number_input("Y축(온도) 최대값", value=235); y2_max = st.number_input("보조Y축(ROR) 최대값", value=0.75, format="%.2f")
     st.session_state.axis_ranges = {'x': [x_min, x_max], 'y': [y_min, y_max], 'y2': [y2_min, y2_max]}
 
 st.subheader("프로파일 관리")
